@@ -1,0 +1,308 @@
+package cisc230.game;
+
+import cisc230.ui.GameArea;
+import cisc230.game.Game;
+import cisc230.GameThread;
+import cisc230.game.player.*; // To import all classes in a package use *
+import java.util.Vector;
+import java.util.Iterator;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.awt.Color;
+import java.lang.Integer;
+import java.util.Random;
+
+// See http://download.oracle.com/javase/6/docs/api/java/util/Vector.html
+// See http://download.oracle.com/javase/tutorial/collections/interfaces/collection.html
+// See http://download.oracle.com/javase/6/docs/api/java/util/Iterator.html
+
+public class Game {
+	final public static int WIDTH = 44; // Game area width in tiles
+	final public static int HEIGHT = 33; // Game area height in tiles
+	private GameArea gameArea;
+	private AtomicBoolean isRunning;
+	private int gameCounter;
+	// Vector of all players in the game
+	private Vector<Player> players;
+	// Temporary vector of players that are still alive in current game
+	private Vector<Player> activePlayers;
+	//Vector<Player> observers;
+	private Vector<Bullet> shots;
+	private Array2D<Player> playerTiles; // 2D array of Player type
+	private Array2D<Integer> threatMatrix; // 2D array of Integer type
+	private Player interactivePlayer;
+
+	public Game(GameArea gameArea) {
+		this.gameArea = gameArea;
+		isRunning = new AtomicBoolean(false);
+		gameCounter = 0;
+		players = new Vector<Player>();
+		activePlayers = new Vector<Player>();
+		playerTiles = new Array2D(WIDTH, HEIGHT); // 2D array of Player type
+		threatMatrix = new Array2D(WIDTH, HEIGHT); // 2D array of Integer type
+		shots = new Vector<Bullet>();
+
+		// Add players/bots
+		// TODO: Change "Bot" below to reflect your class name, e.g. "BotMichaelD"
+		addPlayer(new Bot(4, 4)).setPlayerTiles(playerTiles).setThreatMatrix(threatMatrix);
+		// The bot defined in the next two lines is your target
+		Random generator = new Random();
+		addPlayer(new TargetBot(generator.nextInt(20) + 22, generator.nextInt(27) + 3));
+		
+		// TODO: Comment out all the lines below before line number 71 with initialize()
+		//       before submitting first phase of the project
+		// Following bots are just examples: 
+		addPlayer(new SimpleBot(20, 17)).setPlayerTiles(playerTiles).setThreatMatrix(threatMatrix);
+		addPlayer(new FixedBot(4, 29)); // No need to set playerTiles and threatMatrix because this bot is not using them
+		addPlayer(new RandomBot(22, 29)); // No need to set playerTiles and threatMatrix because this bot is not using them
+		// Instead of using inner class we could create a separate class but it's too much redundancy 
+		// since we only need one instance of the class and we are only implementing execute method() 
+		// with two line of code.
+		addPlayer(new FixedBot(22, 17) {
+			public void execute() {
+				setMove(GameObject.UP);
+				setShot(GameObject.RIGHT);
+			}
+		}); // No need to set playerTiles and threatMatrix because this bot is not using them
+		addPlayer(new FixedBot(40, 17)).setPlayerTiles(playerTiles).setThreatMatrix(threatMatrix);
+		setInteractivePlayer(new FixedBot(4, 17));
+		getInteractivePlayer().setColor(Color.green);
+		addPlayer(getInteractivePlayer()).setPlayerTiles(playerTiles).setThreatMatrix(threatMatrix);
+
+		initialize(); // Do not comment out this line
+
+		// Create a game/drawing thread that drives entire game
+		GameThread drawingThread = new GameThread("Drawing", gameArea) {
+	    	public void execute () {
+	    		Game game = this.gameArea.getGame();
+				while (game.isRunning()) { // Game loop
+					// Call each player's execute() method
+					for (int i=0; i<activePlayers.size(); i++) {
+						activePlayers.get(i).execute();
+					}
+					createThreatMatrix();
+					//printThreatMatrix();
+					//sleep(2000);
+					game.fireShots();
+					sleep(50);
+					game.processShots();
+					sleep(100);
+					game.processMoves();
+					sleep(50);
+					game.processShots();
+					if (activePlayers.size()<=1) { // Detect the end of the game
+						game.setRunning(false); // Stop game loop
+						game.showResults();
+						game.eraseAll(); // Erase any remaining shots and last bot if any
+						game.resetPlayers();
+						game.initialize();
+					}
+				}
+	    	}
+	    };
+	    drawingThread.setDelay(150);
+	    // We need to have a reference to drawing thread so we can pause
+	    // and resume drawing in key listener in gameArea
+	    gameArea.setDrawingThread(drawingThread);
+	}
+
+	public boolean isRunning() { return isRunning.get(); }
+	public void setRunning(boolean isRunning) { this.isRunning.set(isRunning); }
+	public Player getInteractivePlayer() {
+		return interactivePlayer;
+	}
+	public void setInteractivePlayer(Player interactivePlayer) {
+		this.interactivePlayer = interactivePlayer;
+	}
+	public void setInteractivePlayerMove(int move) {
+		getInteractivePlayer().setMove(move);
+	}
+	public void setInteractivePlayerShot(int shot) {
+		getInteractivePlayer().setShot(shot);
+	}
+	private void showResults() {
+		gameCounter++;
+		gameArea.writeToLog("Round " + gameCounter + " ended.\n");
+		// TODO: insert code here to show results of each game
+	}
+
+	private void eraseAll() {
+		// Erase all active players
+		for (int i=0; i<activePlayers.size(); i++) {
+			activePlayers.get(i).erase(gameArea.getImage());
+			playerTiles.set(activePlayers.get(i).getGridX()-1, activePlayers.get(i).getGridY()-1, null);
+		}
+		// Erase all shots
+		for (int i=0; i<shots.size(); i++) {
+			shots.get(i).erase(gameArea.getImage());
+		}
+	}
+	private void resetPlayers() {
+		for (int i=0; i<players.size(); i++) {
+			players.get(i).reset();
+		}
+	}
+	private void fireShots() {
+		// Get new shots that are just fired
+		for (int i=0; i<activePlayers.size(); i++) {
+			Player player = activePlayers.get(i);
+			if (player.getShot()!=GameObject.NONE) {
+				shots.add(new Bullet(player.getGridX(), player.getGridY(),
+					player.getShot(), player));
+				player.setShot(GameObject.NONE);
+			}
+		}
+	}
+	private void processShots() {
+		// Move all shots one tile
+		Iterator<Bullet> i = shots.iterator();
+		while (i.hasNext()) {
+			Bullet shot = (Bullet)i.next();
+			Player player = null;
+			int move = shot.getMove();
+			// If shot has not just been fired erase its previous position
+			// Every just fired shot is initially on the same tile as the player who shot it
+			if (playerTiles.get(shot.getGridX()-1, shot.getGridY()-1) == null) {
+				shot.erase(gameArea.getImage());
+			}
+			// Remove shot if it's hitting the edge of game area
+			if ((move==GameObject.UP && shot.getGridY()==1) ||
+				(move==GameObject.DOWN && shot.getGridY()==Game.HEIGHT) ||
+				(move==GameObject.LEFT && shot.getGridX()==1) ||
+				(move==GameObject.RIGHT && shot.getGridX()==Game.WIDTH)) {
+				i.remove(); // You cannot use shots.remove(shot); here!!!
+			// Remove player and shot if shot is moving into player's tile
+			} else if ((move==GameObject.UP && (player=playerTiles.get(shot.getGridX()-1, shot.getGridY()-1-1))!=null) ||
+				(move==GameObject.DOWN && (player=playerTiles.get(shot.getGridX()-1, shot.getGridY()-1+1))!=null) ||
+				(move==GameObject.LEFT && (player=playerTiles.get(shot.getGridX()-1-1, shot.getGridY()-1))!=null) ||
+				(move==GameObject.RIGHT && (player=playerTiles.get(shot.getGridX()-1+1, shot.getGridY()-1))!=null)) {
+				i.remove(); // You cannot use shots.remove(shot); here!!!
+				// Remove shot player
+				playerTiles.set(player.getGridX()-1, player.getGridY()-1, null);
+				player.erase(gameArea.getImage());
+				activePlayers.remove(player);
+			} else {
+				// Move shot
+				switch (move) {
+					case GameObject.UP:
+					shot.changePosition(0, -1);
+					break;
+					case GameObject.DOWN:
+					shot.changePosition(0, 1);
+					break;
+					case GameObject.LEFT:
+					shot.changePosition(-1, 0);
+					break;
+					case GameObject.RIGHT:
+					shot.changePosition(1, 0);
+					break;
+				}
+				shot.draw(gameArea.getImage());
+			}
+		}
+	}
+	private boolean isMovePossible(Player player, int move) {
+		// Is player hitting the edge of the game area?
+		if ((move==GameObject.UP && player.getGridY()==1) ||
+			(move==GameObject.DOWN && player.getGridY()==Game.HEIGHT) ||
+			(move==GameObject.LEFT && player.getGridX()==1) ||
+			(move==GameObject.RIGHT && player.getGridX()==Game.WIDTH)) {
+			return false;
+		// Is player hitting another player?
+		} else if ((move==GameObject.UP && playerTiles.get(player.getGridX()-1, player.getGridY()-1-1)!=null) ||
+			(move==GameObject.DOWN && playerTiles.get(player.getGridX()-1, player.getGridY()-1+1)!=null) ||
+			(move==GameObject.LEFT && playerTiles.get(player.getGridX()-1-1, player.getGridY()-1)!=null) ||
+			(move==GameObject.RIGHT && playerTiles.get(player.getGridX()-1+1, player.getGridY()-1)!=null)) {
+			return false;
+		} else {
+			return true;
+		}
+	}
+	private void processMoves() {
+		for (int i=0; i<activePlayers.size(); i++) {
+			Player player = activePlayers.get(i);
+			int move = player.getMove();
+			if (isMovePossible(player, move)) {
+				player.erase(gameArea.getImage());
+				playerTiles.set(player.getGridX()-1, player.getGridY()-1, null);
+				switch (move) {
+					case GameObject.UP:
+					player.changePosition(0, -1);
+					break;
+					case GameObject.DOWN:
+					player.changePosition(0, 1);
+					break;
+					case GameObject.LEFT:
+					player.changePosition(-1, 0);
+					break;
+					case GameObject.RIGHT:
+					player.changePosition(1, 0);
+					break;
+				}
+				player.draw(gameArea.getImage());
+				playerTiles.set(player.getGridX()-1, player.getGridY()-1, player);
+			}
+
+
+			// Reset move
+			player.setMove(GameObject.NONE);
+		}
+	}
+	private void initialize() {
+		// Set all players' tiles to null
+		playerTiles.initialize(null);
+		// Initialize active players
+		activePlayers.clear();
+		activePlayers.addAll(players);
+		// Initialize shots
+		shots.clear();
+		// Set playerTiles array to reflect active players' positions
+		Iterator<Player> i = activePlayers.iterator();
+		while (i.hasNext()) {
+			Player player = i.next();
+			playerTiles.set(player.getGridX()-1, player.getGridY()-1, player);
+		}
+	}
+	private Player addPlayer(Player player) {
+		players.add(player);
+		activePlayers.add(player);
+		return player;
+	}
+	private void createThreatMatrix() {
+		threatMatrix.initialize(new Integer(0)); // by default set threat level to 0
+		for (int i=0; i<shots.size(); i++) {
+			Bullet shot = shots.get(i);
+			threatMatrix.start(shot.getGridX()-1, shot.getGridY()-1, shot.getMove());
+			int newThreatLevel = 10; // 10 means highest, 9 second highest, ..., 1 lowest, 0 no threat
+			while (threatMatrix.hasNext() && newThreatLevel>0) {
+				threatMatrix.next();
+				int currentThreatLevel;
+				if (threatMatrix.get() != null) {
+					currentThreatLevel = threatMatrix.get().intValue();
+				} else {
+					currentThreatLevel = 0;
+				}
+				if (newThreatLevel > currentThreatLevel) {
+					threatMatrix.set(new Integer(newThreatLevel));
+				}
+				threatMatrix.next();
+				if (threatMatrix.get() != null) {
+					currentThreatLevel = threatMatrix.get().intValue();
+				} else {
+					currentThreatLevel = 0;
+				}
+				if (newThreatLevel > currentThreatLevel) {
+					threatMatrix.set(new Integer(newThreatLevel));
+				}
+				newThreatLevel-=1;
+			}
+		}
+	}
+	private void printThreatMatrix() { // Useful for debugging only
+		for (int i=0; i<HEIGHT; i++) {
+			for (int j=0; j<WIDTH; j++) {
+				System.out.print(threatMatrix.get(j,i).intValue());
+			}
+			System.out.println();
+		}
+	}
+}

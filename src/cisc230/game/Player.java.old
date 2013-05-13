@@ -1,0 +1,112 @@
+package cisc230.game;
+
+import cisc230.Executable;
+import cisc230.ui.GameArea;
+import java.awt.Color;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
+import java.util.Vector;
+
+/**
+ * Defines a player in the game. Player class is declared
+ * abstract because it doesn't implement execute() method
+ * in Executable interface it implements.
+ */
+public abstract class Player extends GameObject implements Executable {
+	private int shot;
+	private String name;
+	// Player's reference to playerTiles from Game object
+	private Array2D<Player> playerTiles; // Array2D of Player type
+	// Player's reference to threatMatrix from Game object
+	private Array2D<Integer> threatMatrix; // Array2D of Integer type
+
+	private int killsCounter; // How many times other players crashed into this player's head
+	private int killedCounter; // How many times this player crashed into other players' heads
+	private int gameScore; // Current game score
+	private int totalScore; // Total score for all games
+
+	/**
+	 * Creates a player at the starting position.
+	 */
+	protected Player(int startGridX, int startGridY) {
+		super(startGridX, startGridY);
+		shot = GameObject.NONE;
+		name = "NoName";
+	}
+
+	/**
+	 * Returns the name of the player.
+	 */
+	public String getName() {
+		return name;
+	}
+	/**
+	 * Sets the name of the player.
+	 */
+	protected Player setName(String name) {
+		this.name = name;
+		return this;
+	}
+	/**
+	 * Allows other objects (e.g. instance of Game class) to
+	 * find out in which direction this player wants to shoot.
+	 */
+	protected final int getShot() {
+		return shot;
+	}
+	/**
+	 * Sets the direction in which this player wants to shoot.
+	 */
+	protected final void setShot(int shot) {
+		this.shot = shot;
+	}
+	/**
+	 * Adds a player who shot this player.
+	 */
+	public void addPlayerWhoShotMe(Player player) {
+		// This is not an abstract method because its implementation is optional
+		// It's up to you to implement this method if you want to
+	}
+	/**
+	 * Resets the position, move and shot of the player.
+	 */
+	protected void reset() {
+		super.reset();
+		setShot(GameObject.NONE);
+	}
+	/**
+	 * Gets player's reference to playerTiles
+	 */
+	public Array2D<Player> getPlayerTiles() {
+		return playerTiles;
+	}
+	/**
+	 * Sets player's reference to playerTiles
+	 */
+	Player setPlayerTiles(Array2D<Player> playerTiles) {
+		this.playerTiles = playerTiles;
+		return this;
+	}
+	/**
+	 * Gets player's reference to threatMatrix
+	 */
+	public Array2D<Integer> getThreatMatrix() {
+		return threatMatrix;
+	}
+	/**
+	 * Sets player's reference to threatMatrix
+	 */
+	Player setThreatMatrix(Array2D<Integer> threatMatrix) {
+		this.threatMatrix = threatMatrix;
+		return this;
+	}
+	int getKillsCounter() { return killsCounter; }
+	void incrementKillsCounter() { killsCounter++; }
+	int getKilledCounter() {	return killedCounter; }
+	void incrementKilledCounter() { killedCounter++; }
+	int getGameScore() { return gameScore; }
+	void incrementGameScore(int score) { gameScore += score; }
+    int getTotalScore() { return totalScore; }
+    void incrementTotalScore(int score) { totalScore += score; }
+}
